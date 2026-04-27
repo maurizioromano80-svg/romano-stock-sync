@@ -1,0 +1,45 @@
+name: Socim Stock Sync
+
+on:
+  schedule:
+    # Ogni 4 ore: 00:00, 04:00, 08:00, 12:00, 16:00, 20:00 UTC
+    - cron: '0 */4 * * *'
+  workflow_dispatch:  # Permette avvio manuale dalla UI GitHub
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright browsers
+        run: playwright install chromium --with-deps
+
+      - name: Run stock sync
+        env:
+          WC_CONSUMER_KEY: ${{ secrets.WC_CONSUMER_KEY }}
+          WC_CONSUMER_SECRET: ${{ secrets.WC_CONSUMER_SECRET }}
+          SOCIM_USER: ${{ secrets.SOCIM_USER }}
+          SOCIM_PASS: ${{ secrets.SOCIM_PASS }}
+          ROMANO_SYNC_TOKEN: ${{ secrets.ROMANO_SYNC_TOKEN }}
+        run: python socim_stock_sync.py
+
+      - name: Upload log as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sync-log-${{ github.run_number }}
+          path: "*.log"
+          retention-days: 14
