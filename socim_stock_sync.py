@@ -593,7 +593,7 @@ if sync_token:
         resp = requests.post(
             'https://www.romanoforniture.com/wp-json/romano/v1/sync-log',
             json={'log': summary},
-            headers={'X-Sync-Token': sync_token},
+            headers={'Authorization': f'Bearer {sync_token}'},
             timeout=15
         )
         if resp.status_code == 200:

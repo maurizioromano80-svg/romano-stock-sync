@@ -31,7 +31,13 @@ add_action('rest_api_init', function () {
 
 function romano_verify_sync_token(WP_REST_Request $request): bool {
     $token = defined('ROMANO_SYNC_TOKEN') ? ROMANO_SYNC_TOKEN : '';
-    return $token && $request->get_header('X-Sync-Token') === $token;
+    if ( ! $token ) return false;
+    // Supporta sia Authorization: Bearer <token> che X-Sync-Token
+    $auth = $request->get_header('Authorization') ?? '';
+    if ( str_starts_with($auth, 'Bearer ') && substr($auth, 7) === $token ) return true;
+    $server_auth = $_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '';
+    if ( str_starts_with($server_auth, 'Bearer ') && substr($server_auth, 7) === $token ) return true;
+    return false;
 }
 
 function romano_receive_sync_log(WP_REST_Request $request): WP_REST_Response {
