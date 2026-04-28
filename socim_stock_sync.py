@@ -11,7 +11,6 @@ Skips "prodotti stock" (discontinued) items.
 """
 
 import asyncio
-import os
 import re
 import time
 import requests
@@ -19,15 +18,15 @@ from collections import defaultdict
 from playwright.async_api import async_playwright
 
 # ── WooCommerce ──────────────────────────────────────────────────────────────
-CK   = os.environ['WC_CONSUMER_KEY']
-CS   = os.environ['WC_CONSUMER_SECRET']
+CK   = 'ck_aad42597fa98979b2587fa28fb04e3417bf2bed0'
+CS   = 'cs_258cb4a1358b282089fe2a3f9cdfffdf61a11fc3'
 BASE = 'https://www.romanoforniture.com/wp-json/wc/v3'
 AUTH = {'consumer_key': CK, 'consumer_secret': CS}
 
 # ── B2B ──────────────────────────────────────────────────────────────────────
 B2B_URL  = 'https://b2b.socim.it/Web/views/web/webuplogin.jsf'
-B2B_USER = os.environ['SOCIM_USER']
-B2B_PASS = os.environ['SOCIM_PASS']
+B2B_USER = 'CL026609'
+B2B_PASS = 'YS584WT'
 
 # Size tokens (to distinguish size from color in 2-part SKUs)
 SIZE_TOKENS = {
@@ -65,27 +64,41 @@ def parse_qty(s: str) -> int:
 
 # Groups of equivalent color names (any two in the same group are considered a match)
 _COLOR_SYNONYMS = [
-    {'NERO', 'NERA'},
-    {'ROSSO', 'ROSSA'},
-    {'AZZURRO', 'AZZURRA'},
-    {'GRIGIO', 'GRIGIA'},
-    {'BIANCO', 'BIANCA'},
-    {'BLU', 'BLUE', 'NAVY'},
-    {'VERDE', 'MILITARE'},
+    {'NERO', 'NERA', 'BLACK', 'NERO/GRIGIO', 'NERO/ROSSO'},
+    {'ROSSO', 'ROSSA', 'RED', 'BORDEAUX', 'BORDO'},
+    {'AZZURRO', 'AZZURRA', 'AZZURRO ROYAL', 'CELESTE'},
+    {'GRIGIO', 'GRIGIA', 'GRIGIO ANTRACITE', 'GRIGIO MELANGE', 'GRIGIO CHIARO',
+     'GRIGIO SCURO', 'ANTRACITE', 'GREY', 'GRAY', 'MELANGE'},
+    {'BIANCO', 'BIANCA', 'WHITE', 'BIANCO/BLU', 'BIANCO/ROSSO'},
+    {'BLU', 'BLUE', 'NAVY', 'BLU NAVY', 'BLU ROYAL', 'BLU OTTANIO',
+     'BLU/NERO', 'BLU/ARANCIO', 'BLU/GIALLO'},
+    {'VERDE', 'MILITARE', 'VERDE MILITARE', 'VERDE BOSCO', 'VERDE FLUO',
+     'VERDE ARMY', 'FOREST', 'MIMETICO'},
+    {'GIALLO', 'GIALLO FLUO', 'YELLOW', 'FLUO GIALLO'},
+    {'ARANCIO', 'ARANCIO FLUO', 'ORANGE', 'FLUO ARANCIO', 'ARANCIONE'},
+    {'MARRONE', 'BROWN', 'TABACCO', 'CUOIO', 'NOCCIOLA'},
+    {'BEIGE', 'SABBIA', 'SAND', 'CORDA'},
+    {'VIOLA', 'PURPLE', 'LILLA', 'LAVANDA'},
+    {'ROSA', 'PINK', 'FUCSIA'},
 ]
 
 def colors_match(wc_color: str, b2b_color: str) -> bool:
-    """Match color names handling masculine/feminine Italian variants and synonyms."""
+    """Match color names handling Italian variants, synonyms, and partial matches."""
     if not wc_color or not b2b_color:
         return False
-    if wc_color == b2b_color:
+    wc  = wc_color.upper().strip()
+    b2b = b2b_color.upper().strip()
+    if wc == b2b:
         return True
-    if wc_color in b2b_color or b2b_color in wc_color:
+    # Contenimento: "GRIGIO" matcha "GRIGIO ANTRACITE"
+    if wc in b2b or b2b in wc:
         return True
+    # Sinonimi
     for group in _COLOR_SYNONYMS:
-        if wc_color in group and b2b_color in group:
+        if wc in group and b2b in group:
             return True
-    if len(wc_color) >= 5 and len(b2b_color) >= 5 and wc_color[:5] == b2b_color[:5]:
+    # Prefisso 4 caratteri
+    if len(wc) >= 4 and len(b2b) >= 4 and wc[:4] == b2b[:4]:
         return True
     return False
 
@@ -563,41 +576,15 @@ for prod_id, var_updates in updates_by_product.items():
 
 # ── 5. Summary ───────────────────────────────────────────────────────────────
 
-import datetime
-summary = (
-    f"Sync completato: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}\n"
-    f"Variazioni WC totali: {len(variation_data)}\n"
-    f"Matchate con B2B:     {matched}\n"
-    f"Aggiornate OK:        {ok_count}\n"
-    f"Errori:               {err_count}\n"
-    f"Non trovate su B2B:   {len(not_found)}"
-)
-
 print('\n' + '=' * 60)
 print('RIEPILOGO FINALE')
 print('=' * 60)
-print(summary)
+print(f'Variazioni WooCommerce totali:  {len(variation_data)}')
+print(f'Variazioni matchate con B2B:    {matched}')
+print(f'Variazioni aggiornate OK:       {ok_count}')
+print(f'Errori aggiornamento:           {err_count}')
+print(f'Non trovate su B2B:             {len(not_found)}')
 if not_found[:10]:
     print(f'\nPrime SKU non trovate:')
     for s in not_found[:10]:
         print(f'  - {s}')
-
-# Salva log locale
-with open('sync_summary.log', 'w', encoding='utf-8') as f:
-    f.write(summary + '\n')
-
-# Invia riepilogo al plugin WordPress (visibile in WC Admin > Sync Scorte)
-sync_token = os.environ.get('ROMANO_SYNC_TOKEN', '')
-if sync_token:
-    try:
-        resp = requests.post(
-            'https://www.romanoforniture.com/wp-json/romano/v1/sync-log',
-            json={'log': summary, 'token': sync_token},
-            timeout=15
-        )
-        if resp.status_code == 200:
-            print('\nLog inviato al backend WordPress.')
-        else:
-            print(f'\nAvviso invio log WP: {resp.status_code}')
-    except Exception as e:
-        print(f'\nAvviso invio log WP: {e}')
