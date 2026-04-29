@@ -1,0 +1,39 @@
+name: Socim Discovery (one-shot)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  discover:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright browsers
+        run: python -m playwright install chromium --with-deps
+
+      - name: Run discovery
+        env:
+          WC_CONSUMER_KEY: ${{ secrets.WC_CONSUMER_KEY }}
+          WC_CONSUMER_SECRET: ${{ secrets.WC_CONSUMER_SECRET }}
+        run: python socim_discover.py
+
+      - name: Upload discovery results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: socim-discovery-${{ github.run_number }}
+          path: "socim_discovery.csv"
+          retention-days: 30
