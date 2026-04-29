@@ -111,6 +111,32 @@ _COLOR_SYNONYMS = [
     {'ROSA', 'PINK', 'FUCSIA'},
 ]
 
+# Mappa colore WooCommerce → suffisso SKU Socim (es. E0400 + A = E0400A)
+_COLOR_TO_SUFFIX = {
+    'ARANCIO': 'A',    'ARANCIONE': 'A',    'ARANCIO FLUO': 'A',
+    'AZZURRA': 'AZ',   'AZZURRO': 'AZ',
+    'BLU ATOLLO': 'BA',
+    'BIANCA': 'BI',    'BIANCO': 'BI',
+    'BORDEAUX': 'BO',  'BORDO': 'BO',
+    'CACAO': 'C',      'MARRONE': 'C',
+    'BLU SCURO': 'DB',
+    'GRIGIO': 'G',     'GRIGIO MELANGE': 'G', 'GRIGIO CHIARO': 'G',
+    'GIALLO': 'GI',    'GIALLA': 'GI',    'GIALLO FLUO': 'GI',
+    'GRIGIO ANTRACITE': 'GK', 'ANTRACITE': 'GK', 'GRIGIO SMOKE': 'GK',
+    'GRIGIO MELANGE SCURO': 'GS', 'GRIGIO SCURO': 'GS',
+    'MIMETICO': 'M',   'MILITARE': 'M',   'VERDE MILITARE': 'M', 'ARMY': 'M',
+    'NERO': 'N',       'NERA': 'N',
+    'BLU ROYAL': 'R',  'ROYAL': 'R',
+    'ROSSO': 'RO',     'ROSSA': 'RO',
+    'ROSA': 'RS',      'FUCSIA': 'RS',
+    'VERDE': 'V',      'VERDE BOSCO': 'V', 'VERDE FLUO': 'V',
+    'VERDE PRATO': 'VP',
+    'VIOLA': 'VI',
+    'BLU': 'BL',       'BLUE': 'BL',      'BLU NAVY': 'BL', 'NAVY': 'BL',
+    'BEIGE': 'BE',
+    'GIALLO FLUO': 'GF',
+}
+
 def colors_match(wc_color: str, b2b_color: str) -> bool:
     """Match color names handling Italian variants, synonyms, and partial matches."""
     if not wc_color or not b2b_color:
@@ -352,6 +378,38 @@ async def scrape_code(page, code: str) -> dict | None:
     await page.wait_for_load_state('networkidle')
     await page.wait_for_timeout(2500)
 
+    # Helper: navigate fresh to a product detail page by search code
+    async def nav_to_product(pg, search_code):
+        """Re-navigate fresh to product detail page; handles session expiry."""
+        await navigate_to_search(pg)
+        si = pg.locator('input[name*="RICERCA"], input[id*="RICERCA"]')
+        if await si.count() == 0 or not await si.first.is_visible():
+            return False
+        await si.first.fill(search_code)
+        await si.first.press('Enter')
+        await pg.wait_for_load_state('networkidle')
+        await pg.wait_for_timeout(2000)
+        cards2 = pg.locator('.IML_img')
+        if await cards2.count() == 0:
+            return False
+        if await check_session_expired(pg):
+            await relogin(pg)
+            si2 = pg.locator('input[name*="RICERCA"], input[id*="RICERCA"]')
+            await si2.first.fill(search_code)
+            await si2.first.press('Enter')
+            await pg.wait_for_load_state('networkidle')
+            await pg.wait_for_timeout(2000)
+            cards2 = pg.locator('.IML_img')
+            if await cards2.count() == 0:
+                return False
+        await cards2.first.click()
+        await pg.wait_for_load_state('networkidle')
+        await pg.wait_for_timeout(2500)
+        return True
+
+    # Colors needed for this base code (from WooCommerce)
+    needed_colors = {(c.upper() if c else None) for _, _, c, _, _ in by_code[code]}
+
     # Find color variant table
     dt = page.locator('table[role="grid"]').filter(has=page.locator('th[aria-label="Articolo"]'))
     has_colors = await dt.count() > 0
@@ -365,9 +423,6 @@ async def scrape_code(page, code: str) -> dict | None:
         if row_count == 0:
             variant_rows = dt.first.locator('tr.ui-widget-content')
             row_count = await variant_rows.count()
-
-        # Determine which colors we need for this code
-        needed_colors = {(c.upper() if c else None) for _, _, c, _, _ in by_code[code]}
 
         # Build color-to-row-index map from B2B
         # First pass: read all row text (all cells) without clicking
@@ -432,35 +487,6 @@ async def scrape_code(page, code: str) -> dict | None:
                 if not matched:
                     print(f'    No B2B match for color "{needed_color}"')
 
-        async def nav_to_product(pg, search_code):
-            """Re-navigate fresh to product detail page; handles session expiry."""
-            await navigate_to_search(pg)  # navigate_to_search already calls check_session_expired
-            si = pg.locator('input[name*="RICERCA"], input[id*="RICERCA"]')
-            if await si.count() == 0 or not await si.first.is_visible():
-                return False
-            await si.first.fill(search_code)
-            await si.first.press('Enter')
-            await pg.wait_for_load_state('networkidle')
-            await pg.wait_for_timeout(2000)
-            cards2 = pg.locator('.IML_img')
-            if await cards2.count() == 0:
-                return False
-            # Session may expire between search and card click
-            if await check_session_expired(pg):
-                await relogin(pg)
-                si2 = pg.locator('input[name*="RICERCA"], input[id*="RICERCA"]')
-                await si2.first.fill(search_code)
-                await si2.first.press('Enter')
-                await pg.wait_for_load_state('networkidle')
-                await pg.wait_for_timeout(2000)
-                cards2 = pg.locator('.IML_img')
-                if await cards2.count() == 0:
-                    return False
-            await cards2.first.click()
-            await pg.wait_for_load_state('networkidle')
-            await pg.wait_for_timeout(2500)
-            return True
-
         first_color = True
         for target_color in sorted(colors_to_scrape, key=lambda x: (x is None, x)):
             row_idx = b2b_color_rows.get(target_color, 0)
@@ -493,26 +519,34 @@ async def scrape_code(page, code: str) -> dict | None:
             code_data[target_color] = sizes
 
     else:
-        # No color variant table - product might show sizes directly
-        # or there's only one variant to click
-        # Try reading stock directly from product page
+        # No color variant table on the base-code page.
+        # Case 1: product has stock directly (simple product, no color)
         sizes = await parse_stock_from_page(page)
         if sizes:
             code_data[None] = sizes
             print(f'    No color table, direct stock: {sum(sizes.values())} total')
         else:
-            print(f'    No color table, no stock data found')
-            # Save targeted HTML snippet for diagnosis
-            try:
-                html2 = await page.content()
-                flat = ' '.join(html2.split())
-                # Extract anything after <body to skip head CSS/JS
-                body_idx = flat.lower().find('<body')
-                body_part = flat[body_idx:body_idx+8000] if body_idx >= 0 else flat[-8000:]
-                with open('no_color_table.log', 'a', encoding='utf-8') as f:
-                    f.write(f'\n\n=== {code} ===\n{body_part}\n')
-            except Exception:
-                pass
+            # Case 2: Socim uses per-color sub-codes (e.g. E0400A, E0400AZ ...)
+            # Try each needed color's suffix code separately
+            suffix_found = 0
+            for nc in sorted([c for c in needed_colors if c]):
+                suffix = _COLOR_TO_SUFFIX.get(nc)
+                if not suffix:
+                    continue
+                sub_code = code + suffix
+                ok = await nav_to_product(page, sub_code)
+                if not ok:
+                    continue
+                sz = await parse_stock_from_page(page)
+                if sz:
+                    code_data[nc] = sz
+                    suffix_found += 1
+                    print(f'    Suffix {sub_code} ({nc}): {sum(sz.values())} pz')
+                else:
+                    print(f'    Suffix {sub_code} ({nc}): no stock data')
+                # Navigate back to base page isn't needed — next iteration calls nav_to_product
+            if not suffix_found:
+                print(f'    No color table, no stock data found (tried {len([c for c in needed_colors if c and _COLOR_TO_SUFFIX.get(c)])} suffixes)')
 
     # Navigate back to catalog
     await js_click_back(page)
