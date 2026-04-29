@@ -502,12 +502,15 @@ async def scrape_code(page, code: str) -> dict | None:
             print(f'    No color table, direct stock: {sum(sizes.values())} total')
         else:
             print(f'    No color table, no stock data found')
-            # Save HTML snippet for diagnosis (first 3000 chars, stripped)
+            # Save targeted HTML snippet for diagnosis
             try:
                 html2 = await page.content()
-                snippet = ' '.join(html2.split())[:3000]
+                flat = ' '.join(html2.split())
+                # Extract anything after <body to skip head CSS/JS
+                body_idx = flat.lower().find('<body')
+                body_part = flat[body_idx:body_idx+8000] if body_idx >= 0 else flat[-8000:]
                 with open('no_color_table.log', 'a', encoding='utf-8') as f:
-                    f.write(f'\n\n=== {code} ===\n{snippet}\n')
+                    f.write(f'\n\n=== {code} ===\n{body_part}\n')
             except Exception:
                 pass
 
