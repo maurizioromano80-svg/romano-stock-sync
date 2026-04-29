@@ -62,6 +62,35 @@ def parse_qty(s: str) -> int:
     except:
         return 0
 
+# Normalizza varianti di nome taglia allo stesso token canonico
+_SIZE_NORMALIZE = {
+    'XXXL': '3XL', 'XXXXL': '4XL', 'XXXXXL': '5XL',
+    '3XL': '3XL', '4XL': '4XL', '5XL': '5XL',
+    'XXL': 'XXL', 'XL': 'XL', 'L': 'L', 'M': 'M', 'S': 'S', 'XS': 'XS',
+}
+
+def normalize_size(s: str) -> str:
+    if not s:
+        return s
+    u = s.upper().strip()
+    return _SIZE_NORMALIZE.get(u, u)
+
+def get_stock_for_size(sizes_data: dict, size: str) -> int:
+    """Look up stock by size, normalizing synonyms (e.g. XXXL == 3XL)."""
+    if not size:
+        return sum(sizes_data.values())
+    norm = normalize_size(size)
+    # Try exact match first, then normalized
+    if size in sizes_data:
+        return sizes_data[size]
+    if norm in sizes_data:
+        return sizes_data[norm]
+    # Try reverse: normalize each key from sizes_data
+    for k, v in sizes_data.items():
+        if normalize_size(k) == norm:
+            return v
+    return 0
+
 # Groups of equivalent color names (any two in the same group are considered a match)
 _COLOR_SYNONYMS = [
     {'NERO', 'NERA', 'BLACK', 'NERO/GRIGIO', 'NERO/ROSSO'},
@@ -510,10 +539,12 @@ for (prod_id, var_id), (sku, code, color, size) in variation_data.items():
         if not sizes_data:
             # Try summing across all color keys
             for color_key, sizes in code_data.items():
-                if size and size in sizes:
-                    stock_qty = (stock_qty or 0) + sizes[size]
+                if size:
+                    v = get_stock_for_size(sizes, size)
+                    if v:
+                        stock_qty = (stock_qty or 0) + v
         else:
-            stock_qty = sizes_data.get(size, 0) if size else sum(sizes_data.values())
+            stock_qty = get_stock_for_size(sizes_data, size)
     else:
         # 3-part SKU: match by color word
         color_key = None
@@ -532,7 +563,7 @@ for (prod_id, var_id), (sku, code, color, size) in variation_data.items():
 
         if color_key is not None or None in code_data:
             sizes_data = code_data.get(color_key, {})
-            stock_qty = sizes_data.get(size, 0) if size else sum(sizes_data.values())
+            stock_qty = get_stock_for_size(sizes_data, size)
 
     if stock_qty is None:
         not_found.append(sku)
