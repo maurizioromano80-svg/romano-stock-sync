@@ -512,6 +512,19 @@ async def scrape_code(page, code: str) -> dict | None:
             if await rows3.count() == 0:
                 rows3 = dt3.first.locator('tr.ui-widget-content')
             actual_count = await rows3.count()
+            # Scroll the target row into view before checking availability
+            if actual_count > 0 and row_idx < actual_count:
+                try:
+                    await rows3.nth(row_idx).scroll_into_view_if_needed(timeout=3000)
+                    await page.wait_for_timeout(500)
+                    # Re-count after scroll (table may load more rows dynamically)
+                    dt3b = page.locator('table[role="grid"]').filter(has=page.locator('th[aria-label="Articolo"]'))
+                    rows3 = dt3b.first.locator('tr.ui-datatable-selectable')
+                    if await rows3.count() == 0:
+                        rows3 = dt3b.first.locator('tr.ui-widget-content')
+                    actual_count = await rows3.count()
+                except Exception:
+                    pass
             if actual_count == 0 or row_idx >= actual_count:
                 print(f'    Row {row_idx} not available for {target_color} — trying suffix fallback')
                 # Fallback: try suffix-based sub-code (e.g. E0400 + BI = E0400BI)
