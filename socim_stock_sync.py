@@ -198,6 +198,14 @@ async def check_session_expired(page) -> bool:
 async def relogin(page):
     """Re-authenticate on session expiry, then navigate to Catalogo."""
     print('    SESSION EXPIRED — re-logging in...')
+    # Try to dismiss any blocking dialog before navigating away
+    try:
+        ok_btn = page.locator('#sessionExpiredDialog .ui-dialog-buttonset button, button:has-text("OK"), button:has-text("Chiudi")')
+        if await ok_btn.count() > 0:
+            await ok_btn.first.click(timeout=3000)
+            await page.wait_for_timeout(500)
+    except Exception:
+        pass
     await page.goto(B2B_URL, wait_until='networkidle')
     await page.wait_for_timeout(1000)
     await page.fill('#loginTabView\\:j_idt70\\:j_idt74', B2B_USER)
@@ -505,7 +513,24 @@ async def scrape_code(page, code: str) -> dict | None:
                 rows3 = dt3.first.locator('tr.ui-widget-content')
             actual_count = await rows3.count()
             if actual_count == 0 or row_idx >= actual_count:
-                print(f'    Row {row_idx} not available for {target_color}')
+                print(f'    Row {row_idx} not available for {target_color} — trying suffix fallback')
+                # Fallback: try suffix-based sub-code (e.g. E0400 + BI = E0400BI)
+                suffix = _COLOR_TO_SUFFIX.get(target_color) if target_color else None
+                if suffix:
+                    sub_code = code + suffix
+                    ok = await nav_to_product(page, sub_code)
+                    if ok:
+                        sz = await parse_stock_from_page(page)
+                        if sz:
+                            code_data[target_color] = sz
+                            print(f'    Suffix {sub_code} ({target_color}): {sum(sz.values())} pz')
+                        else:
+                            print(f'    Suffix {sub_code} ({target_color}): no stock data')
+                        first_color = True  # reset so next color re-navigates fresh
+                    else:
+                        print(f'    Suffix {sub_code} not found on B2B')
+                else:
+                    print(f'    No suffix defined for {target_color}')
                 continue
 
             await rows3.nth(row_idx).click()
